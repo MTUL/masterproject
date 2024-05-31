@@ -14,6 +14,7 @@ logit <- function(x) log(x/(1-x))
 
 # Loading dataset
 load("trial_data_720sites.Rdata")
+load("null_models.Rdata")
 
 #### Table 1: ####
 table1data <- dlong %>% select(patient_id, treatment_arm, TET2_mut) %>% 
@@ -557,6 +558,11 @@ ggarrange(resid.plot, qq,
           nrow = 1, ncol = 2, labels = c("A", "B"))
 dev.off()
 
+png("figures/Diagnostics.png", width = 480, height = 240)
+ggarrange(resid.plot, qq, 
+          nrow = 1, ncol = 2, labels = c("A", "B"))
+dev.off()
+
 #### Visualization of simulated treatment effects ####
 dlong$fitted_mnull4 <- getME(mnull4, name = "X") %*% fixef(mnull4) 
 
@@ -585,7 +591,8 @@ small_predictions %>% data.frame() %>%
       bind_cols(small) %>% 
       pivot_longer(cols = starts_with("effect.")) %>% 
       mutate(fitted_beta = inverse_logit(value),
-             effect = gsub("effect.", "Effect ", name)) %>% 
+             effect = gsub("effect.", "Effect ", name),
+             visit = if_else(visit == "1", "baseline", "end")) %>% 
       filter(treatment_arm == "vitaminC" | name == "pred_0") %>%
       ggplot(aes(x = visit, y = fitted_beta, group = effect, color = effect)) +
       geom_line() +
@@ -616,11 +623,6 @@ preddat %>% filter(visit == 5 & effect == "Effect 1") %>%
 
 #
 #### Power as a function of different simulated effect sizes ####
-remove_non_numeric <- function(x) {
-      str_extract(x, "[0-9.]+") %>%
-            as.numeric()
-}
-
 filenames <- 
       data.frame(filename = list.files(path = "simulations", 
                                        pattern = "perm.results")) %>% 
@@ -632,7 +634,7 @@ filenames <-
                sep = "_", 
                into = c("samplesize", "cpgnumber", "effect", "nsim", "nperm", "resdist"),
                remove = F) %>% 
-      mutate_at(vars(-filename, -runname, -setup), ~remove_non_numeric(.)) %>% 
+      mutate_at(vars(-filename, -runname, -setup), ~ as.numeric(gsub("\\D+", "", .))) %>% 
       filter(samplesize != 100)
 
 
@@ -785,6 +787,48 @@ plotdata.3 %>% ggplot(aes(x = effect,
       geom_hline(yintercept = 0.05, linetype = "dashed") +
       facet_wrap(~ name)
 
+#### Distributions of AATE_hats ####
+pdf("figures/mean_aatehats.pdf", width = 6, height = 3)
+filenames %>% 
+      filter(samplesize == 0 & cpgnumber == 0) %>% 
+      select(effect, g1_meanaatehat, g2_meanaatehat, g3_meanaatehat, resdist) %>% 
+      pivot_longer(contains("mean")) %>%
+      mutate(`Residual distribution` = factor(resdist, 
+                                              levels = c(0,1), 
+                                              labels = c("Normal", "Empirical")),
+             `g function`= gsub("_meanaatehat", "", name),
+             effect.num = 1-exp((effect-1)/9)) %>% 
+      ggplot(aes(y = value, x = effect.num, 
+                 color = `g function`,
+                 group = interaction(`g function`, `Residual distribution`),
+                 linetype = `Residual distribution`)) +
+      geom_line() + geom_point() +
+      ylab("mean estimated AATE") +
+      xlab("Effect size")
+dev.off()
+
+files.res1 <- filenames %>% 
+      filter(samplesize == 0 & cpgnumber == 0 & resdist == 1) %>% 
+      pull(filename)
+
+aatehat1s <- {}
+for(i in 1:8){
+      f <- files.res1[i]
+      aatehat1s <- read.csv(paste0("simulations/", f)) %>% 
+            select(g1_AATEhat) %>% 
+            bind_cols(aatehat1s)
+      names(aatehat1s)[1] <- paste0("eff.", i)
+}
+pdf("figures/aatehat1.distribution.pdf", width = 6, height = 3)
+aatehat1s %>% pivot_longer(everything()) %>% 
+      mutate(effect = gsub("eff.", "", name) %>% as.numeric(),
+             `Effect size` = factor(round(1-exp((effect-1)/9), 2))) %>% 
+      ggplot(aes(x = value, group = `Effect size`, color = `Effect size`)) +
+      geom_density() +
+      xlab("estimated AATE")
+dev.off()
+
+#
 #### Computation times ####
 
 cpt.filenames <- 
@@ -797,7 +841,7 @@ cpt.filenames <-
                sep = "_", 
                into = c("samplesize", "cpgnumber", "effect", "nsim", "nperm", "resdist"),
                remove = F) %>% 
-      mutate_at(vars(-filename, -runname, -setup), ~remove_non_numeric(.)) %>% 
+      mutate_at(vars(-filename, -runname, -setup), ~ as.numeric(gsub("\\D+", "", .))) %>% 
       filter(samplesize != 100)
 
 cpt.filenames$comptime <- NA
@@ -1090,7 +1134,7 @@ filenames.strat <-
                sep = "_", 
                into = c("stratum", "cpgnumber", "effect", "nsim", "nperm"),
                remove = F) %>% 
-      mutate_at(vars(-filename, -runname, -setup, -stratum), ~remove_non_numeric(.)) %>% 
+      mutate_at(vars(-filename, -runname, -setup, -stratum), ~ as.numeric(gsub("\\D+", "", .))) %>% 
       mutate(stratum = gsub("strat", "", stratum))
 
 
@@ -1208,7 +1252,8 @@ effectplot.wt <- small_predictions.wt %>%
       mutate(fitted_beta = inverse_logit(value),
              effect = case_when(name == "effect.0" ~ "Placebo",
                                 name == "effect.1" ~ "-1.05",
-                                name == "effect.2" ~ "-0.79")) %>% 
+                                name == "effect.2" ~ "-0.79"),
+             visit = if_else(visit == "1", "baseline", "end")) %>% 
       ggplot(aes(x = visit, y = fitted_beta, group = effect, color = effect)) +
       geom_line() +
       ylim(c(0,1)) +
@@ -1242,7 +1287,8 @@ effectplot.mut <- small_predictions.mut %>%
       mutate(fitted_beta = inverse_logit(value),
              effect = case_when(name == "effect.0" ~ "Placebo",
                                 name == "effect.1" ~ "-1.14",
-                                name == "effect.2" ~ "-0.79")) %>% 
+                                name == "effect.2" ~ "-0.79"),
+             visit = if_else(visit == "1", "baseline", "end")) %>% 
       ggplot(aes(x = visit, y = fitted_beta, group = effect, color = effect)) +
       geom_line() +
       ylim(c(0,1))  +
@@ -1389,47 +1435,6 @@ ggarrange(permplot.WT, permplot.mut,
 dev.off()
 
 # 
-#### For discussion: Correlations between CpG sites in different models ####
-
-summary(mnull1)
-
-summary(mnull4)
-summary(mnull5)
-
-# Random effects:
-# Groups     Name        Variance Std.Dev.
-# probe_mut  (Intercept) 0.15887  0.3986  
-# probeID    (Intercept) 1.09427  1.0461  
-# arrayID    (Intercept) 0.09337  0.3056  
-# patient_id (Intercept) 0.85649  0.9255  
-# Residual               0.38490  0.6204
-
-# Variances:
-v.probe_mut  <- 0.3986
-v.probeID    <- 1.0461
-v.arrayID    <- 0.3056
-v.patient_id <- 0.9255
-v.residual   <- 0.6204
-
-# Correlation between two M values at the same CpG site in different times in the same patient:
-(v.probe_mut + v.probeID + v.patient_id) / (v.probe_mut + v.probeID + v.arrayID + v.patient_id + v.residual)
-# = 0.72
-
-# Correlation between two M values at DIFFERENT CpG sites in the same time in the same patient:
-(v.patient_id + v.arrayID) / (v.probe_mut + v.probeID + v.arrayID + v.patient_id + v.residual)
-# = 0.37
-
-# Correlation between two M values at DIFFERENT CpG sites in different times in the same patient:
-(v.patient_id) / (v.probe_mut + v.probeID + v.arrayID + v.patient_id + v.residual)
-# = 0.28
-
-# Correlation between two M values at the same site in different patients with different mutation status
-(v.probeID) / (v.probe_mut + v.probeID + v.arrayID + v.patient_id + v.residual)
-# = 0.32
-
-# Correlation between two M values at the same site in different patients with same mutation status
-(v.probeID + v.probe_mut) / (v.probe_mut + v.probeID + v.arrayID + v.patient_id + v.residual)
-# = 0.44
 
 #### ####
 
