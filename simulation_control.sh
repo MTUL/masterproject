@@ -52,8 +52,6 @@ for n_cpg in "10" "50" "100" "300" "1500" "3000" "5000" "10000"; do
 done
 
 # Stratified simulations:
-# NB: remember to use different R script and different launch script!
-
 n_cpg="50"
 nsim="1000"
 nperm="1000"
